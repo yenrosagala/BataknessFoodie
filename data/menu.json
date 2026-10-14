@@ -1,4 +1,11 @@
 {
-  "categories": [],
-  "items": []
+  "categories": ["Lauk", "Mie & Camilan", "Sambal & Oleh-oleh", "Kopi"],
+  "items": [
+    { "id": "arsik", "name": "Arsik Ikan Mas", "category": "Lauk", "description": "Ikan mas dimasak dengan andaliman dan kecombrang. Hidangan khas adat Batak.", "price": 85000, "unit": "porsi", "available": true, "bestSeller": true },
+    { "id": "saksang", "name": "Saksang", "category": "Lauk", "description": "Daging cincang dimasak lama dengan bumbu kaya rempah. [ISI] jenis daging.", "price": 75000, "unit": "porsi", "available": true, "bestSeller": true },
+    { "id": "mie-gomak", "name": "Mie Gomak", "category": "Mie & Camilan", "description": "Mie tebal khas Batak dengan bumbu rempah dan andaliman.", "price": 35000, "unit": "porsi", "available": true, "bestSeller": true },
+    { "id": "itak", "name": "Itak Gurgur", "category": "Mie & Camilan", "description": "Manisan tepung beras tradisional, cocok untuk oleh-oleh.", "price": 30000, "unit": "bungkus", "available": true, "bestSeller": false },
+    { "id": "sambal-andaliman", "name": "Sambal Andaliman", "category": "Sambal & Oleh-oleh", "description": "Sambal pedas dengan sensasi andaliman. Tahan lama.", "price": 45000, "unit": "botol", "available": true, "bestSeller": true },
+    { "id": "kopi", "name": "Kopi Sidikalang", "category": "Kopi", "description": "Kopi Sumatera Utara. [ISI] gramasi dan jenis gilingan.", "price": 60000, "unit": "250 g", "available": false, "bestSeller": false }
+  ]
 }

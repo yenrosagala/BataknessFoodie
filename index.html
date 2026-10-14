@@ -2,7 +2,187 @@
 <html lang="id">
 <head>
 <meta charset="utf-8">
-<title>Batak Food</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Beranda | Makanan Batak Asli</title>
+<meta name="description" content="Makanan Batak asli: arsik, saksang, mie gomak, sambal andaliman. Pesan lewat WhatsApp.">
+<link rel="stylesheet" href="css/main.css">
+<script src="js/theme.js"></script>
 </head>
-<body></body>
+<body data-page="home" data-title="Makanan Batak Asli">
+<main>
+<section class="hero">
+  <div>
+    <h1>Makanan Batak Asli, Dimasak Segar Setiap Hari</h1>
+    <p id="tagline">Rasa Batak yang asli, dibuat dengan andaliman sungguhan di Jayapura.</p>
+    <a class="btn" href="menu.html">Pesan Sekarang</a>
+  </div>
+</section>
+
+<section>
+  <h2>Menu Favorit</h2>
+  <div id="fav-grid" class="grid"></div>
+</section>
+
+<section>
+  <h2>Cara Pesan</h2>
+  <ol class="steps">
+    <li>Pilih hidangan di halaman Menu.</li>
+    <li>Buka keranjang, isi nama, nomor HP, dan alamat.</li>
+    <li>Kirim lewat WhatsApp. Kami konfirmasi dan proses pesananmu.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>Siap pesan?</h2>
+  <p>Lihat menu lengkap, baca cerita kami, atau cek info pengiriman dan catering.</p>
+  <p><a class="btn" href="menu.html">Lihat Menu</a> <a class="btn ghost" href="info.html">Info &amp; Catering</a></p>
+</section>
+</main>
+
+<div id="staff" hidden>
+<div class="ulos"></div>
+<header>
+  <strong id="brand">Panel</strong>
+  <button id="signout" class="btn small" type="button" hidden>Keluar</button>
+  <button id="close-staff" class="btn ghost small" type="button" hidden>Tutup</button>
+</header>
+
+<section id="login">
+  <h2>Masuk</h2>
+  <form id="login-form">
+    <label>Email<input name="email" type="email" required autocomplete="username"></label>
+    <label>Kata sandi<input name="password" type="password" required autocomplete="current-password"></label>
+    <p id="login-err" role="alert"></p>
+    <button class="btn" type="submit">Masuk</button>
+  </form>
+</section>
+
+<section id="app" hidden>
+  <div class="admin-shell">
+    <nav id="tabs" class="admin-nav" role="tablist" aria-orientation="vertical" aria-label="Bagian admin">
+      <button class="tab" type="button" role="tab" id="tab-ringkasan" data-tab="ringkasan" aria-selected="true" aria-controls="panel-ringkasan">Ringkasan</button>
+      <button class="tab" type="button" role="tab" id="tab-analisis" data-tab="analisis" aria-selected="false" aria-controls="panel-analisis">Analisis</button>
+      <button class="tab" type="button" role="tab" id="tab-pesanan" data-tab="pesanan" aria-selected="false" aria-controls="panel-pesanan">Pesanan</button>
+      <button class="tab" type="button" role="tab" id="tab-menu" data-tab="menu" aria-selected="false" aria-controls="panel-menu">Menu</button>
+      <button class="tab" type="button" role="tab" id="tab-jatah" data-tab="jatah" aria-selected="false" aria-controls="panel-jatah">Jatah harian</button>
+    </nav>
+
+    <div class="admin-body">
+      <div class="admin-bar">
+        <h2 id="view-title">Ringkasan</h2>
+        <div class="row">
+          <p id="updated" role="status" aria-live="polite"></p>
+          <button id="refresh" class="btn small" type="button">Muat ulang</button>
+        </div>
+      </div>
+
+      <section id="panel-ringkasan" role="tabpanel" aria-labelledby="tab-ringkasan">
+        <div id="stats" class="grid"></div>
+        <div class="ov-grid">
+          <div class="widget"><h3>Omzet 7 hari terakhir</h3><div id="ov-days"></div></div>
+          <div class="widget"><h3>Status pesanan</h3><div id="ov-status"></div></div>
+        </div>
+        <div class="widget">
+          <h3>Pesanan terbaru</h3>
+          <div id="ov-orders"></div>
+          <button id="ov-more" class="btn ghost" type="button">Lihat semua pesanan</button>
+        </div>
+      </section>
+
+      <section id="panel-analisis" role="tabpanel" aria-labelledby="tab-analisis" hidden>
+        <div id="an-presets" class="chips" role="group" aria-label="Rentang cepat">
+          <button class="chip" type="button" data-range="today">Hari ini</button>
+          <button class="chip" type="button" data-range="7">7 hari</button>
+          <button class="chip" type="button" data-range="30">30 hari</button>
+          <button class="chip" type="button" data-range="month">Bulan ini</button>
+        </div>
+        <div class="row">
+          <label>Dari<input id="an-from" type="date"></label>
+          <label>Sampai<input id="an-to" type="date"></label>
+          <label>Menu<select id="an-item"></select></label>
+        </div>
+        <div id="an-stats" class="grid"></div>
+        <div class="widget"><h3>Omzet harian</h3><div id="an-days"></div></div>
+        <div class="widget"><h3>Penjualan per item</h3><div id="an-items"></div></div>
+      </section>
+
+      <section id="panel-pesanan" role="tabpanel" aria-labelledby="tab-pesanan" hidden>
+        <div class="widget">
+          <h3>Buat pesanan di toko</h3>
+          <label>Nama pelanggan (opsional)<input id="kasir-name" autocomplete="off" placeholder="Pelanggan"></label>
+          <div id="kasir-menu"></div>
+          <p>Total: <strong id="kasir-total">Rp 0</strong></p>
+          <p id="kasir-err" role="alert"></p>
+          <button id="kasir-create" class="btn" type="button">Buat pesanan</button>
+        </div>
+        <div id="filters" class="chips" role="group" aria-label="Filter status"></div>
+        <button id="export-selesai" class="btn small" type="button" hidden>Unduh Excel</button>
+        <p id="app-err" role="alert"></p>
+        <div id="orders" class="grid"></div>
+      </section>
+
+      <section id="panel-menu" role="tabpanel" aria-labelledby="tab-menu" hidden>
+        <div class="menu-col">
+          <h3 id="menu-form-title">Tambah menu</h3>
+          <form id="menu-form" novalidate>
+            <label>Nama<input name="name" required></label>
+            <label>Kategori<input name="category" list="cat-list" required></label>
+            <datalist id="cat-list"></datalist>
+            <label>Deskripsi<textarea name="description" rows="2"></textarea></label>
+            <label>Harga (Rp)<input name="price" type="number" min="0" step="500" required></label>
+            <label>Satuan<input name="unit" required placeholder="porsi"></label>
+            <label>Foto (satu URL per baris)<textarea name="images" rows="3" placeholder="https://contoh.com/arsik-1.jpg"></textarea></label>
+            <div class="row">
+              <label><input type="checkbox" name="available" checked> Tersedia</label>
+              <label><input type="checkbox" name="bestSeller"> Terlaris</label>
+            </div>
+            <p id="menu-err" role="alert"></p>
+            <div class="row">
+              <button class="btn" type="submit">Simpan</button>
+              <button id="menu-cancel" class="btn ghost" type="button" hidden>Batal</button>
+            </div>
+          </form>
+        </div>
+        <div class="menu-col">
+          <h3>Daftar menu</h3>
+          <div id="menu-list" class="grid"></div>
+        </div>
+      </section>
+
+      <section id="panel-jatah" role="tabpanel" aria-labelledby="tab-jatah" hidden>
+        <p class="note">Atur berapa banyak tiap item untuk tanggal ini. Pelanggan melihat "Sisa hari ini" di menu. Kosongkan = tanpa batas.</p>
+        <label>Tanggal<input id="plan-date" type="date"></label>
+        <div id="plan-rows" class="grid"></div>
+        <p id="plan-err" role="alert"></p>
+        <button id="plan-save" class="btn" type="button">Simpan jatah</button>
+      </section>
+    </div>
+  </div>
+</section>
+
+<dialog id="send-dialog" aria-labelledby="send-title">
+  <h3 id="send-title">Kirim pesan ke pembeli</h3>
+  <label for="send-text">Pesan yang akan dikirim</label>
+  <textarea id="send-text" rows="10"></textarea>
+  <p id="send-err" role="alert"></p>
+  <div class="row">
+    <button id="send-go" class="btn" type="button">Kirim WhatsApp</button>
+    <button id="send-cancel" class="btn ghost" type="button">Batal</button>
+  </div>
+</dialog>
+
+<dialog id="receipt-dialog" aria-labelledby="receipt-title">
+  <h3 id="receipt-title">Struk pesanan</h3>
+  <img id="receipt-img" class="receipt-img" alt="Struk pesanan">
+  <div class="row">
+    <button id="receipt-download" class="btn" type="button">Unduh gambar</button>
+    <button id="receipt-print" class="btn ghost" type="button">Cetak</button>
+    <button id="receipt-close" class="btn ghost" type="button">Tutup</button>
+  </div>
+</dialog>
+</div>
+
+<script type="module" src="js/site.js"></script>
+<script type="module" src="js/admin.js"></script>
+</body>
 </html>

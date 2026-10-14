@@ -1,1 +1,16 @@
-{}
+{
+  "sampleData": true,
+  "business": { "name": "Batakness Foodie", "tagline": "Rasa Batak yang asli, dibuat dengan andaliman sungguhan di Jayapura.", "whatsapp": "628000000000", "city": "Entrop, Jayapura Selatan, Papua" },
+  "halal": "[ISI] Status halal: tulis sesuai kenyataan (halal / non-halal / keduanya terpisah).",
+  "preorder": { "open": true, "deliveryWeekday": 6, "cutoffDaysBefore": 2, "cutoffHour": 20, "weeks": 3 },
+  "delivery": ["Pengiriman di Jayapura dan sekitarnya.", "[ISI] Ongkir dan minimal order", "Pembayaran: [ISI] transfer bank / QRIS"],
+  "story": [
+    "Andaliman adalah merica khas Batak: segar seperti jeruk, dan membuat lidah bergetar. Inilah rasa yang membedakan masakan Batak asli.",
+    "[ISI] Ceritakan siapa yang memasak, resep siapa, dan dari mana bahan-bahan didapat."
+  ],
+  "faq": [
+    { "q": "Bagaimana cara memesan?", "a": "Pilih menu, isi data, lalu kirim lewat WhatsApp. Pesanan dikonfirmasi setelah kami membalas." },
+    { "q": "Bagaimana menyimpan dan memanaskan?", "a": "[ISI] Petunjuk simpan dan panaskan per produk." },
+    { "q": "Apakah halal?", "a": "[ISI] Samakan dengan status halal di atas." }
+  ]
+}

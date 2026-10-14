@@ -1,26 +1,42 @@
-# Architecture
+?# Architecture
 
 Update after each major step. Explain what every file does.
 
 ## Planned structure
 ```
 batak-web/
-├── index.html           Page structure and sections
+├── index.html           Beranda (hero, Menu Favorit, Cara Pesan)
+├── menu.html            Menu (chips + full grid)
+├── tentang.html         Cerita
+├── info.html            Info (halal, pengiriman, FAQ)
+(no admin.html - staff dashboard embedded in index.html as a hidden #staff overlay, opened by #login)
 ├── css/
 │   └── main.css         Design tokens, layout, components
 ├── js/
-│   ├── main.js          App entry: loads data, wires modules
-│   ├── menu.js          Fetch and render menu, category filter
-│   ├── cart.js          Cart state and calculations (no DOM code)
-│   ├── cart-ui.js       Cart drawer and sticky bar
+│   ├── site.js          Per-page entry: fetch data, title, renderLayout, fill fields, wire cart
+│   ├── layout.js        Injects shared chrome (banner, header/nav, ulos, footer, cart bar, drawer)
+│   ├── menu.js          Render fav + chips + grid; card click opens the dish modal
+│   ├── dish-modal.js    Dish detail modal: image carousel + description + add to cart
+│   ├── cart.js          Cart state (id->qty, no DOM)
+│   ├── cart-ui.js       Cart drawer, sticky bar, checkout submit
 │   ├── checkout.js      Form fields and validation
 │   ├── dates.js         Pre-order cutoff and delivery dates
+│   ├── location.js      "Gunakan lokasi saya": geolocation + keyless Google Maps link
 │   ├── whatsapp.js      Build message and open wa.me link
-│   └── format.js        Price and date formatting helpers
+│   ├── theme.js         Light/dark theme
+│   ├── admin.js         Staff panel controller (auth, roles/gating, orders, menu, jatah, walk-in, receipt)
+│   ├── receipt.js       Canvas order receipt (draw / download PNG / print)
+│   ├── db.js            Supabase access (native fetch)
+│   ├── supabase-config.js Public URL + publishable key
+│   └── format.js        Price/date formatting + esc
 ├── data/
-│   ├── menu.json        Categories and items
+│   ├── menu.json        Seed/fallback menu (used only until sql/menu.sql is run)
 │   └── site.json        Business info, preorder, delivery, FAQ, story
-├── images/              Compressed food photos and logo
+├── sql/
+│   ├── quota.sql        daily_plans table + remaining_today() (run once)
+│   ├── menu.sql         menu_items table + seed (run once)
+│   └── kasir.sql        orders.channel column for walk-in orders (run once)
+├── robots.txt           Allow all
 ├── memory-bank/         Project documents for the AI
 ├── CLAUDE.md / AGENTS.md
 └── README-START-HERE.md
@@ -28,28 +44,97 @@ batak-web/
 
 ## Data schema
 
-menu.json
+menu.json (seed / fallback only — the live menu is the Supabase menu_items table; no images field — the live table carries them)
 - categories: list of category names
 - items: list of objects with
-  id (unique slug), name, category, description, price (number, rupiah), unit (porsi, botol, bungkus), type (fresh, frozen, dry), available (true/false), image (path), bestSeller (true/false)
+  id (unique slug), name, category, description, price (number, rupiah), unit (porsi, botol, bungkus), available (true/false), bestSeller (true/false), images (list of image URLs, optional — letter placeholder when empty)
 
 site.json
+- sampleData: true shows the "DATA CONTOH" banner until real data is filled
 - business: name, tagline, whatsapp, city, instagram
-- halal: statement shown on the site
-- preorder: open (true/false), cutoff rule, delivery days
-- delivery: areas, fees, minimum order, notes
-- payment: accepted methods and instructions
-- faq: list of question and answer pairs
-- story: text blocks for Cerita Kami
+- halal: statement shown on the site (free text)
+- preorder: open (true/false), deliveryWeekday (0-6, 6=Saturday), cutoffDaysBefore, cutoffHour, weeks
+- delivery: array of text lines (areas, ongkir, payment) shown as a list
+- story: array of paragraphs for Cerita Kami
+- faq: list of { q, a } pairs
 
-## Current files (after Step 1)
-- index.html: minimal valid HTML shell (charset + title), empty body. Content added in later steps.
-- css/main.css: empty placeholder. Layout and tokens added in Step 2.
-- js/main.js: empty placeholder. App entry added in later steps.
-- data/menu.json: valid JSON with empty categories and items arrays.
-- data/site.json: valid JSON placeholder (empty object).
-- .gitignore: ignores OS cruft only (Thumbs.db, .DS_Store). No build or dependencies to ignore.
-- images/: empty folder for food photos; not tracked by git until the first image lands.
+orders (Supabase Postgres table, public schema)
+- id (uuid pk), created_at (timestamptz default now())
+- customer_name, phone, method ('antar'|'ambil'), address, delivery_date (display text), notes
+- items (jsonb: [{ id, name, price, qty }]), total (int), status ('baru'|'diproses'|'dikirim'|'selesai', default 'baru' — free text, no check-constraint, so new values need no migration)
+- channel ('online'|'kasir', default 'online' — added by sql/kasir.sql; distinguishes walk-in order-center orders from storefront orders)
+- RLS: anon may INSERT only; authenticated may SELECT + UPDATE. See the setup SQL in progress.md / README notes.
+
+daily_plans (Supabase Postgres table — daily quota per item per date; schema in sql/quota.sql)
+- date (date), item_id (text), daily_limit (int >= 0), unique(date, item_id). Only the owner (authenticated) can touch it; FULL CRUD policy.
+- remaining_today(): SECURITY DEFINER sql function, anon-executable (GRANT to anon, authenticated). Returns jsonb array [{ id, remaining }] = plan limit minus today's ordered qty (from orders.items, by created_at::date in Asia/Jakarta). Clamps at 0, no customer data, no direct table reads by the public. Storefront calls it via POSTGREST RPC (db.js fetchRemaining).
+
+menu_items (Supabase Postgres table — the live menu; schema + seed in sql/menu.sql)
+- id (text pk, slug), name, category (text), description (text), price (int >= 0), unit (text), available (bool, default true), best_seller (bool, default false), images (text[] default '{}' — one or more photo URLs), sort (bigint, display order), created_at (timestamptz default now()).
+- RLS: anon + authenticated may SELECT (menu is public); only authenticated may INSERT/UPDATE/DELETE. sql/menu.sql seeds the 6 original dishes (on conflict do nothing) so the storefront looks unchanged after the table is created. The images column was added later — sql/menu.sql includes an idempotent `alter table ... add column if not exists images text[]` so re-running it upgrades an already-created table.
+- Storefront reads it via db.js listMenu() and falls back to data/menu.json if the table isn't there yet (e.g. before sql/menu.sql is run). Admin add/edit/delete via db.js createMenuItem/updateMenuItem/deleteMenuItem.
+
+## Current files (multi-page site)
+- Pages (each `<body data-page=... data-title=...>` with one `<main>`, then `<script type="module" src="js/site.js">`): index.html (Beranda: hero + Menu Favorit + Cara Pesan + links), menu.html (full Menu: chips + grid), tentang.html (Cerita Kami, dark band), info.html (Pengiriman + FAQ + Catering). The shared chrome (banner, header/nav, ulos, footer, cart bar, cart drawer) is NOT in the HTML — it is injected by js/layout.js.
+- css/main.css: design-system stylesheet. Token-first: brand primitives + semantic colour tokens (light/dark), type scale (fluid clamp headings), 8pt spacing, radius/shadow/motion/z tokens. Components consume tokens only; dark theme remaps semantic tokens via prefers-color-scheme. ulos divider pattern, mobile-first base, cards/chips/steps/drawer/form, focus-visible rings, hover/reduced-motion guards.
+- js/theme.js: classic (non-module) script in <head>. Sets data-theme on <html> from localStorage (key batak-theme) or system preference before first paint. Toggle clicks are handled by event delegation (so it works on the injected header); also set on DOMContentLoaded. Storage in try/catch.
+- js/layout.js: renderLayout(site) builds the shared chrome from site.json and injects it — banner+header+ulos prepended to <body> (the wrapper's children are spread, so <header> is a direct body child — required for position:sticky), footer+cart-bar+drawer appended. Header = sticky (top:0, z-index 5) single row: brand (left) + .site-nav (Beranda/Menu/Cerita/Info, aria-current from body.dataset.page) + right-aligned .header-actions (Pesan CTA + Login link -> index.html#login + theme toggle). On mobile .site-nav wraps to a second row (order:2) while brand+actions share row 1; at >=720px all three sit on one row (order:0). Sets the footer WhatsApp href.
+- js/site.js: shared entry for every page (replaces the old main.js). Fetches site.json, then the menu from Supabase (db.js listMenu(); on failure falls back to data/menu.json so the site still works before sql/menu.sql is run — the fallback logs one error until then), sets document.title from body.dataset.title, calls renderLayout, fills [data-biz] + the page-specific #halal/#story/#delivery/#faq/#wa-catering (each guarded — a page only has some), then fetches today's remaining (fetchRemaining, caught — a failure just means no plan is shown yet), wires cart + menu + cart-ui + location.
+- js/menu.js: renderMenu(menu, onAdd, remaining) renders into only the elements that exist on the page (guarded): #fav-grid (best sellers) and/or #chips + #menu-grid. "Habis" disabled state when available is false. remaining = Map<itemId, number> of today's quota from remaining_today(); when present the card shows a .badge pill — "Sisa hari ini: N" when left, "Habis hari ini" at 0 — and the button becomes disabled "Habis hari ini" (card stays visible with a dashed .dayout border). No entry in the Map = no daily plan = unlimited. The thumbnail is a real <button class="ph"> ("Lihat detail <name>") and the whole card is clickable (delegated handler ignores clicks on inner buttons), both opening js/dish-modal.js with a shared stateOf(item) {left,hasPlan,outToday}, so the card and its modal always agree.
+- js/dish-modal.js: openDish(item, state, onAdd) — builds a single modal DOM lazily and caches it. Shows an image carousel (item.images; letter placeholder when empty), the description, the price, and an add button that mirrors the card's available/dayout logic; adding calls onAdd(id) then closes (so the bottom cart bar is visible). Arrows + dots + "n / m" counter appear only with 2+ images; ArrowLeft/Right, Escape, and Tab are handled; focus goes to the close button and returns to the opener on close; body scroll locked. Same modal pattern as the cart drawer (css/main.css #dish-modal/.carousel). ponytail: no touch-swipe — the 44px arrows are the only way to change slides; add swipe only if users ask.
+- js/cart.js: createCart() factory. State is id->qty only (price-agnostic). add/inc/dec/remove, lines/count, subscribe listeners. localStorage in try/catch. CONTRACT: subscribe(fn) calls fn() with NO argument — read state inside via cart.lines()/cart.count(). Do not expect the list as an argument (this caused the cart/checkout bug).
+- js/cart-ui.js: initCartUI(cart, items, site). Wires the sticky bar, the drawer as a modal dialog (open locks body scroll + focuses the close button, close/backdrop/Esc returns focus to the cart bar, Tab/Shift-Tab trapped inside the panel), cart lines with quantity controls + a per-line "Hapus" (cart.remove), the date select, and the order-form submit. Submit shows inline errors under each invalid field (.field-err, aria-invalid + aria-describedby) plus a focusable summary line, then re-validates per field live (blur/input/change) after the first failed submit; clearing the cart closes the drawer. On success it inserts the order (fire-and-forget) and opens WhatsApp.
+- js/checkout.js: methodOf() (internal) / syncAddress (address only for "antar"), validate() returns [{ field: 'name'|'phone'|'address'|'date', msg }] (Indonesian messages), readOrder().
+- js/dates.js: localISO() (shared date helper, also imported by admin.js); deliveryDates(preorder) (internal) computes upcoming delivery days from deliveryWeekday + cutoff; fillDateSelect() fills the select and returns how many dates are open.
+- js/location.js: initLocation(). "Gunakan lokasi saya" button (inside #addr-wrap in the drawer form). Uses navigator.geolocation + a KEYLESS google.com/maps?q=lat,lng link (no Maps API key, so no secret in the front-end). Appends the link as a "Lokasi: <url>" line to the address field (replacing any prior one), so it reaches both the WhatsApp message and the Supabase order with no schema change. Needs a secure context (https or localhost); shows an Indonesian fallback on denial/timeout/unavailable. ponytail: address is a plain textarea, so an owner/admin sees the URL as text, not a map embed — upgrade only if a map preview is actually needed.
+- js/whatsapp.js: waBase(number) builds the https://wa.me/<digits> base (used by layout.js + site.js for header/footer/catering links), buildMessage() text + openWhatsApp(number, text) (number optional).
+- js/format.js: rupiah(), longDate(), esc().
+- data/menu.json: seed/fallback only (categories + 6 items). The live menu is the Supabase menu_items table; edit dishes in admin (tab Menu), not this file.
+- sql/quota.sql: daily_plans table (owner-only FULL CRUD RLS) + remaining_today() SECURITY DEFINER RPC (anon-executable, counts today's orders by created_at::date in Asia/Jakarta, returns only {id, remaining}, clamped >= 0). Run in the Supabase SQL editor once — DDL can't go through the REST API.
+- sql/menu.sql: menu_items table (public SELECT for anon+authenticated; write only for authenticated; images text[] with an idempotent add-column) + seeds the 6 original dishes (on conflict do nothing). Run once in the Supabase SQL editor (re-run to add the images column to an existing table). Until it's run, the storefront uses the menu.json fallback (admin tab Menu will show a load error).
+- data/site.json: sampleData flag + business / halal / preorder / delivery / story / faq.
+- robots.txt: allow all.
+- #staff (inside index.html): staff dashboard (role-gated), a sidebar shell + 5 panels (Ringkasan, Analisis, Pesanan, Menu, Jatah harian) inside #app. The shell is `.admin-shell` (grid: 240px nav + fluid body); `#tabs` is a **vertical** role=tablist inside `.admin-nav` (sticky at `calc(68px + space-4)` on desktop, a horizontal scroll strip at ≤860px). `.admin-body` holds `.admin-bar` (page h2 `#view-title` + `#updated` inline status + `#refresh`) and the 5 role=tabpanel sections. Ringkasan is a widget grid: `#stats` KPI cards, then `.ov-grid` (2-col at ≥900px) with the 7-day omzet line chart (`#ov-days`) and a status-mix bar panel (`#ov-status`), then a full-width `.widget` with the latest-orders **table** (`#ov-orders`) + `#ov-more`. Tab Menu holds the add/edit/delete dish form (#menu-form, incl. a "Foto (satu URL per baris)" textarea) + the menu list (#menu-list). The sign-in form is inside #staff; the overlay stays hidden until #login. A native `<dialog id="send-dialog">` at the end of `<body>` previews/edits the message before sending to a buyer, and a `<dialog id="receipt-dialog">` shows the walk-in struk image (download/print). #panel-pesanan also holds the walk-in builder as a `.widget` before #filters. Tabs the signed-in role may not use are hidden and #brand shows the role label.
+- Roles (one dashboard, role-gated tabs): the #staff dashboard serves three roles from Supabase user metadata (`user_metadata.role`). ROLE_TABS in js/admin.js: kasir -> [pesanan], admin -> [menu, jatah], owner -> all 5. Missing/unknown role defaults to owner (ponytail: only the owner creates staff users). The single login entry is the "Login" link in the public header (js/layout.js). The walk-in (in-store) builder lives in a `.widget` inside #panel-pesanan: pick available dishes with a qty `<input class="qty">`, optional name, live total, "Buat pesanan" inserts `{channel:'kasir', method:'ambil', phone:'', items, total}` and opens the receipt; walk-in cards show a muted "Kasir" badge + a "Struk" button. The old kasir.html / js/kasir.js page was removed (folded into this dashboard); ACTION wording for in-store is Baru->Proses, Diproses->Siap diambil, Dikirim->Selesai.
+- js/receipt.js: `drawReceipt(order, biz)` renders an order struk onto a `<canvas>` (no library) using `rupiah()` and the brand token, with business name/city from site.json; `downloadReceipt()` saves a PNG (`toBlob`), `printReceipt()` opens a print window. Used by the walk-in flow on the staff dashboard, reusable for a buyer receipt.
+- sql/kasir.sql: `alter table public.orders add column if not exists channel text not null default 'online'` + an index on channel. Run once in the Supabase SQL editor. No RLS change — the kasir restriction is UI-only by design (any authenticated user can still read/update all orders through the API).
+- js/supabase-config.js: SUPABASE_URL + SUPABASE_PUBLISHABLE_KEY (public by design).
+- js/db.js: native-fetch Supabase access (no supabase-js). insertOrder (anon), signIn/signOut/isSignedIn, listOrders(channel?) / setOrderStatus (authenticated; the optional channel arg appends channel=eq.<value>; the staff dashboard now calls listOrders() with no arg (reads all) and keeps the arg for a future channel-scoped view), fetchRemaining (anon RPC remaining_today), listPlans/upsertPlans (authenticated daily_plans; upsert uses on_conflict=date,item_id + merge-duplicates), listMenu (anon read of menu_items, maps best_seller->bestSeller and images->images[] default []), createMenuItem/updateMenuItem/deleteMenuItem (authenticated, throw 'unauth' on 401). Session in localStorage, try/catch. Role: `saveSession` also stores `email` + `role` via `roleOf(user)` (reads `user_metadata.role`, defaults 'owner'), and `currentRole()` returns the stored role (null when signed out) — the refresh path re-runs roleOf so the role survives token refresh.
+- js/admin.js: wires the #staff dashboard — login, applyRole() (reads currentRole(), hides every tab not in ROLE_TABS[role], sets #brand to the role label, shows the first visible tab; keyboard arrow-nav walks only the visible tabs via each tab's index in the visible list), role-gated load()/refresh() (orders are fetched/rendered only when the role can see pesanan/ringkasan/analisis — so a kasir login does one orders fetch, admin does none), render stats (count/omzet/today/top items), status filter chips (semua/baru/diproses/dikirim/selesai — the first four and "Semua" hide finished orders; "Selesai" shows only them), order cards, exportFinished() (the Selesai view's "Unduh Excel" button downloads all finished orders as a `;`-separated UTF-8-BOM CSV via Blob + `<a download>` — no library), the Ringkasan overview (KPI cards + renderOverview(): last-7-days omzet chart via the shared dayChartHTML(), a status-mix bar panel over STATUSES = baru/diproses/dikirim/selesai, a latest-8-orders table, and a "Lihat semua pesanan" shortcut into the Pesanan tab), the Analisis report (quick range presets — Hari ini/7/30/Bulan ini — a `#an-item` dish filter (Semua menu or one dish), a daily omzet **SVG line chart** and a top-item bar list, no chart library), the Menu manager (tab Menu: add form with a category datalist + a one-URL-per-line images textarea, edit prefills + PATCHes, delete; new dish ids are slugified from the name with a -2/-3 suffix for uniqueness; created items get sort=Date.now() so they append; unauth drops back to the login screen), and the quota form (date default = today local, rows from listMenu(), save upserts only filled rows; empty input = no plan for that day = unlimited). Order cards show the status as a `.badge` + a single next-step button (ACTION/NEXT maps: Baru→Proses order, Diproses→Dikirim, Dikirim→Selesai) instead of per-status chips, so the flow can't be skipped; the "Proses order" and "Dikirim" buttons open the `#send-dialog` preview (a native `<dialog>` with an editable textarea prefilled by messageFor() — a receipt-style confirmation for diproses, the "sedang dikirim" notice for dikirim; "Kirim WhatsApp" sends the edited text then advance()s the status, "Batal"/Esc closes with no change), while "Selesai" advances directly (walk-in orders, channel 'kasir', show a muted "Kasir" badge and — having no phone — advance without the dialog, which renderOrders() guards with `&& o.phone`). showTab() also syncs the `.admin-bar` #view-title to the active tab; arrow keys move the vertical tablist (Up/Down, Left/Right aliases).
 
 ## Design decisions
-(add as they are made)
+- Redesign adopted from the owner's newer mock: ulos divider strip, dark Cerita section, system fonts, Georgia headings, dark-mode support. No web-font download.
+- Prices are numbers so the cart can calculate. The "DATA CONTOH" banner (site.sampleData) stays until real data replaces the [ISI] placeholders.
+- Cart stores only id->qty; price/name come from the live menu (Supabase menu_items, else menu.json) at render time, so editing a price updates the cart automatically.
+- The menu moved from a static file to the Supabase menu_items table so the owner can add dishes without touching code. Storefront keeps a menu.json fallback so the site never breaks before sql/menu.sql is run. ponytail: deleting a dish does not rewrite carts that already hold its id (that line just won't render) — acceptable for a single-owner shop; add cart pruning only if it bites.
+- The order flow is one drawer: cart lines + checkout form + "Kirim via WhatsApp".
+- Sticky footer: body is a flex column (min-height 100dvh) with main flex:1, so the footer sits at the bottom of the screen on short pages. The fixed cart bar's 84px reserve is applied only while the bar is shown, via body:has(#cart-bar:not([hidden])) — so the footer is flush when the cart is empty and just above the bar when it isn't. (:has needs a modern browser; the trade-off is no JS class toggle.)
+- Spacing is fluid, not fixed: --gutter (clamp 20–56px) and --section-y (clamp 64–104px) scale with the viewport, plus .card-body padding and grid gaps sit on the --space-* scale. Section headings get extra bottom air and section paragraphs are capped at 68ch so long lines stay readable on wide screens. Tune the feel by editing these tokens, not per-component values.
+- Sections stretch by width: `section { width:100% }` is required because `margin:auto` on a flex-column child suppresses `stretch` and would shrink each section to its content (this made the admin dashboard a narrow centred column).
+- The admin dashboard is live, not a snapshot: `admin.js` re-fetches orders and re-renders Ringkasan/Analisis/Pesanan on a 30s interval (skipped while the tab is hidden), on `visibilitychange`, and via the `#refresh` button; `#updated` reports the last refresh time. The poll refetches the whole `orders` table — fine at current scale, upgrade to Supabase Realtime/incremental updates if it grows large.
+- The admin dashboard opts out of the marketing column: `#app { max-width:none }` fills the window; its layout is a sidebar shell (`.admin-shell` grid: 240px `.admin-nav` + fluid `.admin-body`). `.admin-body > [role="tabpanel"]` is a grid with `min-width:0` and resets the inherited section padding so nested widgets don't double-pad. Stat grids (`#stats`, `#an-stats`) use `auto-fit` so the cards spread to fill the row. The `min-width:0` chain down the grid (shell → body → panel → widget) is what lets `.ov-table-wrap { overflow-x:auto }` scroll the latest-orders table internally instead of stretching the page.
+- Ringkasan is a widget grid, not a plain list: `#stats` then `.ov-grid` (single column, 2 columns at ≥900px) with the omzet chart and the `#ov-status` mix, then a full-width `.widget` card holding the latest-orders table. `.widget` = surface card (border, radius, shadow, padding). `renderOverview()` builds all three: chart via `dayChartHTML()`, status mix and table inline. Status mix reuses the `.chart-rows` label|track|value markup.
+- Analisis reports, no chart library: the daily omzet chart is a hand-built **SVG line chart** (`.line-chart`/`.line-svg`; `dayChartHTML(list, from, to, valueOf)` fills every day in `[from,to]` so gaps read as zero, draws an area + `polyline` with `vector-effect:non-scaling-stroke`, per-day transparent `<rect><title>` hover tooltips, and HTML `.line-labels` thinned to <=7 via `pickLabels()`); top items stay a `.chart-rows` grid (fill width = rev/max %). `#an-days`/`#an-items` are built by `renderAnalisis()`, not tables. A `#an-item` dish `<select>` (options "Semua menu" + every dish seen in orders, `fillItemFilter()`) scopes the whole Analisis - KPIs, line and item list all re-derive from `valueOf(o)` = that dish's price*qty sum (empty = order total). The same `dayChartHTML()` also draws the Ringkasan `#ov-days` line. `.row` wraps (`flex-wrap: wrap`) so the date + menu controls stack on narrow screens instead of overflowing.
+- Admin layout tidy-up (CSS only, plus wrapping the Analisis charts in cards): the `#updated` status is muted small text, not the yellow `.note` notice (and hidden while empty); `.admin-bar` has a bottom divider; `#stats`/`#an-stats` use a tighter 16px gap and `#orders`/`#menu-list`/`#plan-rows` stay at 20px (id-specificity overrides beat the storefront's `@media (min-width:640px) .grid { gap:32px }` rule, which was leaking into the dashboard); stat-card `<strong>` values are `--fs-h3`; the Analisis charts sit in `.widget` cards ("Omzet harian", "Penjualan per item") matching Ringkasan, so panel headings are normalised to `--fs-md` with `margin:0` (the grid gap owns spacing) and the chips row drops its stray margin; `#menu-form` is capped at 40rem (fields no longer stretch the full panel width) and `#login` at 24rem.
+- `#app { margin: 0 }` is required: the shared `section { margin: auto }` rule turns into an auto *vertical* margin on `#app` (a flex-column body child), which vertically centred the whole dashboard whenever a tab's content was shorter than the viewport — so short tabs (Pesanan, Jatah) floated to mid-page while tall tabs sat at the top. Zeroing it pins every tab to the same top. `#login` intentionally keeps `margin:auto`, so the sign-in screen stays centred.
+- Menu tab layout: `#panel-menu` has two `.menu-col` children — the "Tambah menu" heading + `#menu-form`, and the "Daftar menu" heading + `#menu-list`. At `min-width: 1100px` the panel becomes a 2-column grid (`1fr 1fr`, `align-items:start`) so the form and list sit side by side (~459px each at 1440); below 1100px it stacks, preserving the original single-column flow. `.menu-col` is `display:grid; gap:space-4; align-content:start; min-width:0` and `#panel-menu h3 { margin:0 }` restores heading spacing now that the h3s are no longer direct panel children.
+- Dish photos are per-dish URLs on menu_items.images (text[]), entered in the admin, not uploaded files (no storage setup). Clicking a card opens a carousel modal (js/dish-modal.js) reusing the drawer's modal pattern; adding from the modal closes it so the cart bar shows. Dishes without images keep the letter placeholder. ponytail: URLs only — add Supabase Storage upload only if the owner wants to upload from the admin.
+- Drawer cart behaves as a modal dialog (plain CSS/JS, no native <dialog> yet): scroll lock, focus trap, focus restore on close. novalidate on the form — validation is custom inline errors per field (aria-invalid/describedby) with live re-validation, not browser bubbles.
+- The wa.me link works without a number (opens WhatsApp with the message) so the flow is testable before the owner sets a real number.
+- Open item: some visible copy (hero headline, Cara Pesan steps, Catering blurb, banner) is hardcoded in index.html, not site.json. Move it to site.json if the owner wants to edit it without touching HTML.
+
+- Staff dashboard is embedded in index.html, not a separate admin.html: index.html carries the whole dashboard inside a hidden `<div id="staff">`, opened by the `#login` hash (header Login link -> index.html#login). js/admin.js has two modes - standalone (no #staff) or embedded: show() reveals the overlay and sets body[data-mode=staff] (scroll lock via `#staff { position:fixed; inset:0; z-index:60; overflow:auto }`), boot opens only when the hash is #login or a session exists, the `#close-staff` button clears the hash, the 30s/visibilitychange refresh is skipped unless the overlay is open, and sign-out closes it. One page, one data load; robots.txt now allows all (no separate noindex file).
+
+## Design system (main.css refactor)
+- Token layers: brand primitives (red/gold/ink/cream, never flip) -> semantic tokens (--color-*, flip in dark) -> components. Edit :root, not components.
+- Palette ramps were generated + hand-checked (not the skill generator's default, which produced a broken red ramp). Only the used steps are kept as tokens (red 50/200/600/700/800/900, gold 300/500) — unused steps are not declared.
+- Contrast verified WCAG AA for all text pairs in both themes. White on gold fails (2.67:1) so gold always pairs with ink text.
+- Type: fluid headings via clamp; single body size. Spacing on an 8pt scale. Radius/shadow/motion/z-index tokenised.
+- Components: hover/active/disabled states, :focus-visible rings, 44px min touch targets, pointer-capable hover guards, prefers-reduced-motion guard.
+- Rules for future work: add new colours/sizes as tokens first; never hardcode a hex or px in a component.
+- Theme: dark tokens are applied by :root[data-theme="dark"] (not a media query). js/theme.js resolves the initial theme (stored choice, else system) before paint and the header toggle flips data-theme + persists it. Documented "no-JS" is unsupported anyway (menu/cart already need JS).
+- Multi-page: decided (owner) on 4 pages with the chrome injected by js/layout.js (one place to edit nav/header/footer). Trade-off accepted: no-JS/crawlers see page content but not the injected nav/footer. The owner-only "Login" link lives in the header upper-right (next to the theme toggle), per the owner's request.
+- Backend = Supabase (Phase 2). No custom server, no npm, no supabase-js — native fetch hits PostgREST + GoTrue. Storefront uses the publishable key for insert only; the admin page signs in with email/password.
+- The "no keys in front-end" rule has ONE documented exception: the Supabase PUBLISHABLE key, which is meant to be public. Security is entirely in RLS policies. A service_role/secret key must never enter js/supabase-config.js.
+- Order submit still opens WhatsApp AND inserts a row (fire-and-forget): WhatsApp is the reliable confirm path if Supabase is down; Supabase is the admin record.
+- Security ceilings (deliberate): index.html is a public static file — anyone can open the page, but RLS blocks data reads without a login. Anon insert policy is open (with check true) so fake orders are possible; upgrade with a honeypot/rate limit later. Admin stats load all rows client-side; upgrade to a SQL view/RPC past a few thousand orders. Kasir access is UI-limited only: the role gating hides every tab but Pesanan for a kasir login, but the RLS "owner read/update" policies use (true) for any authenticated user, so a cashier login can still read/update all orders via the API — split by role/RLS only if that matters.
