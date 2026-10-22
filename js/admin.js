@@ -1,4 +1,4 @@
-import { listOrders, setOrderStatus, signIn, signOut, isSignedIn, currentRole, insertOrder, listPlans, upsertPlans, listMenu, createMenuItem, updateMenuItem, deleteMenuItem } from './db.js';
+import { listOrders, setOrderStatus, signIn, signOut, isSignedIn, currentRole, insertOrder, listPlans, upsertPlans, listMenu, createMenuItem, updateMenuItem, deleteMenuItem, listStaff, upsertStaff, deleteStaff } from './db.js';
 import { rupiah, esc } from './format.js';
 import { localISO } from './dates.js';
 import { openWhatsApp } from './whatsapp.js';
@@ -16,7 +16,7 @@ const statCard = (l, v) => `<div class="card"><div class="card-body"><p>${esc(l)
 const ROLE_TABS = {
   kasir: ['pesanan'],
   admin: ['menu', 'jatah'],
-  owner: ['ringkasan', 'analisis', 'pesanan', 'menu', 'jatah']
+  owner: ['ringkasan', 'analisis', 'pesanan', 'menu', 'jatah', 'staf']
 };
 const ROLE_LABEL = { kasir: 'Kasir', admin: 'Admin', owner: 'Owner' };
 let role = 'owner';
@@ -30,6 +30,7 @@ let menuItems = [];
 let editingId = null;
 let refreshTimer;
 let biz = {};
+let siteCfg = {};
 let pickerMenu = [];
 let picked = {};
 let currentReceipt = null;
@@ -81,6 +82,7 @@ function wireRole() {
   if (allow('menu')) initMenu();
   if (allow('jatah')) initPlans();
   if (allow('pesanan')) loadPicker();
+  if (allow('staf')) initStaff();
 }
 
 /* Live dashboard: re-fetch orders and re-render every panel that shows them. */
@@ -174,23 +176,29 @@ function card(o) {
   const act = ACTION[st]
     ? `<button class="btn small" type="button" data-id="${esc(o.id)}" data-next="${NEXT[st]}">${ACTION[st]}</button>`
     : '';
+  const detailBtn = `<button class="chip" type="button" data-detail="${esc(o.id)}">Detail</button>`;
   return `<article class="card"><div class="card-body">
     <div class="card-foot"><strong>${esc(o.customer_name || '—')}</strong><small>${esc(when)}</small></div>
     <p>${items}</p>
     <p>${rupiah(o.total)} · ${esc(o.method === 'antar' ? 'Diantar' : 'Ambil sendiri')} · ${esc(o.delivery_date || '')}</p>
     ${o.phone ? `<p><a href="tel:${esc(o.phone)}">${esc(o.phone)}</a>${o.address ? ' · ' + esc(o.address) : ''}</p>` : (o.address ? `<p>${esc(o.address)}</p>` : '')}
     ${o.notes ? `<p>Catatan: ${esc(o.notes)}</p>` : ''}
-    <div class="chips">${o.channel === 'kasir' ? '<span class="badge alt">Kasir</span>' : ''}<span class="badge">${esc(label(st))}</span>${o.channel === 'kasir' ? `<button class="chip" type="button" data-struk="${esc(o.id)}">Struk</button>` : ''}${act}</div>
+    <div class="chips">${o.channel === 'kasir' ? '<span class="badge alt">Offline</span>' : '<span class="badge">Online</span>'}<span class="badge">${esc(label(st))}</span>${o.channel === 'kasir' ? `<button class="chip" type="button" data-struk="${esc(o.id)}">Struk</button>` : ''}${detailBtn}${act}</div>
   </div></article>`;
 }
 
 function renderOrders() {
   const done = filter === 'selesai';
+  const today = localISO(new Date());
   const list = done
-    ? orders.filter(o => o.status === 'selesai')
+    ? orders.filter(o => o.status === 'selesai' && o.created_at && localISO(new Date(o.created_at)) === today)
     : (filter === 'semua' ? orders.filter(o => o.status !== 'selesai') : orders.filter(o => o.status === filter));
-  $('export-selesai').hidden = !(done && list.length);
-  $('orders').innerHTML = list.length ? list.map(card).join('') : '<p class="note">Belum ada pesanan.</p>';
+  // The export covers every finished order (all dates), so it can appear even when today's list is empty.
+  // Owners only.
+  $('export-selesai').hidden = !(done && role === 'owner' && orders.some(o => o.status === 'selesai'));
+  $('orders').innerHTML = list.length
+    ? list.map(card).join('')
+    : `<p class="note">${done ? 'Belum ada pesanan selesai hari ini.' : 'Belum ada pesanan.'}</p>`;
   $('orders').querySelectorAll('button[data-next]').forEach(b =>
     b.addEventListener('click', () => {
       const o = orders.find(x => String(x.id) === b.dataset.id);
@@ -205,6 +213,12 @@ function renderOrders() {
     b.addEventListener('click', () => {
       const o = orders.find(x => String(x.id) === b.dataset.struk);
       if (o) showReceipt(o);
+    }));
+  // Order detail dialog
+  $('orders').querySelectorAll('button[data-detail]').forEach(b =>
+    b.addEventListener('click', () => {
+      const o = orders.find(x => String(x.id) === b.dataset.detail);
+      if (o) openOrderDialog(o);
     }));
 }
 
@@ -263,6 +277,102 @@ function messageFor(o, step) {
   if (o.delivery_date) lines.push(`Tanggal: ${o.delivery_date}`);
   lines.push('', 'Kami kabari lagi kalau pesanan sudah dikirim.');
   return lines.join('\n');
+}
+
+/* Text for the driver; the buyer's keyless Maps link rides along inside the address. */
+function driverMessage(o) {
+  const lines = [`Antar pesanan${o.id ? ' #' + o.id : ''}`, `Nama: ${o.customer_name || '-'}`];
+  if (o.phone) lines.push(`HP: ${o.phone}`);
+  if (o.delivery_date) lines.push(`Tanggal: ${o.delivery_date}`);
+  if (o.address) lines.push(`Alamat: ${o.address}`);
+  lines.push('', ...(o.items || []).map(it => `- ${it.name} x${it.qty}`), `Total: ${rupiah(o.total)}`);
+  return lines.join('\n');
+}
+
+/* Online + delivery orders: also notify the driver when the order goes out ("Dikirim").
+   No-op until the owner fills drivers in site.json (placeholder has no digits). */
+function getDrivers() {
+  return (siteCfg.drivers || (siteCfg.driver ? [siteCfg.driver] : [])).filter(d => d.whatsapp);
+}
+function notifyDriver(o, driverIdx = 0) {
+  const drivers = getDrivers();
+  if (!drivers.length || o.method !== 'antar' || o.channel === 'kasir') return;
+  openWhatsApp(drivers[driverIdx]?.whatsapp || drivers[0].whatsapp, driverMessage(o));
+}
+
+function openOrderDialog(o) {
+  const detail = $('order-detail');
+  const actions = $('order-actions');
+  const drivers = getDrivers();
+  const isOnline = o.channel !== 'kasir';
+  const isAntar = o.method === 'antar';
+  const when = o.created_at ? new Date(o.created_at).toLocaleString('id-ID') : '';
+  const tpl = document.getElementById('order-detail-tpl').content.cloneNode(true);
+
+  tpl.querySelector('[data-field="customer_name"]').textContent = o.customer_name || '—';
+  tpl.querySelector('[data-field="when"]').textContent = when;
+  tpl.querySelector('[data-field="items"]').textContent = (o.items || []).map(it => `${it.name} ×${it.qty}`).join(', ');
+  tpl.querySelector('[data-field="total"]').textContent = rupiah(o.total);
+  tpl.querySelector('[data-field="method"]').textContent = o.method === 'antar' ? 'Diantar' : 'Ambil sendiri';
+  const dd = tpl.querySelector('[data-if="delivery_date"]');
+  if (o.delivery_date) { dd.querySelector('[data-field="delivery_date"]').textContent = o.delivery_date; } else { dd.remove(); }
+  const ph = tpl.querySelector('[data-if="phone"]');
+  if (o.phone) { ph.querySelector('[data-field="phone"]').textContent = o.phone; ph.querySelector('a').href = 'tel:' + o.phone; } else { ph.remove(); }
+  const ad = tpl.querySelector('[data-if="address"]');
+  if (o.address) { ad.querySelector('[data-field="address"]').textContent = o.address; } else { ad.remove(); }
+  const nt = tpl.querySelector('[data-if="notes"]');
+  if (o.notes) { nt.querySelector('[data-field="notes"]').textContent = o.notes; } else { nt.remove(); }
+  tpl.querySelector('[data-field="channel"]').textContent = isOnline ? 'Online' : 'Offline';
+  tpl.querySelector('[data-field="status"]').textContent = label(o.status || 'baru');
+  detail.replaceChildren(tpl);
+
+  actions.innerHTML = '';
+  if (isOnline && isAntar && drivers.length) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'driver-select';
+    const label = document.createElement('label');
+    label.innerHTML = '<strong>Pilih driver:</strong>';
+    wrapper.appendChild(label);
+    drivers.forEach((d, i) => {
+      const btn = document.getElementById('driver-btn-tpl').content.cloneNode(true).querySelector('button');
+      btn.textContent = d.name;
+      btn.dataset.driver = o.id;
+      btn.dataset.idx = i;
+      btn.addEventListener('click', () => {
+        notifyDriver(o, i);
+        $('order-dialog').close();
+      });
+      wrapper.appendChild(btn);
+    });
+    actions.appendChild(wrapper);
+  }
+  const step = NEXT[o.status];
+  if (step && ACTION[step]) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = ACTION[step];
+    btn.dataset.id = o.id;
+    btn.dataset.next = step;
+    btn.addEventListener('click', () => {
+      $('app-err').textContent = '';
+      if ((step === 'diproses' || step === 'dikirim') && o.phone) {
+        openSendDialog(o, step);
+      } else {
+        advance(o, step);
+      }
+      $('order-dialog').close();
+    });
+    actions.appendChild(btn);
+  }
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'btn ghost';
+  closeBtn.textContent = 'Tutup';
+  closeBtn.addEventListener('click', () => $('order-dialog').close());
+  actions.appendChild(closeBtn);
+
+  $('order-dialog').showModal();
 }
 
 let sendCtx = null;
@@ -471,10 +581,14 @@ function renderCatList() {
 
 function renderMenuList() {
   if (!menuItems.length) { $('menu-list').innerHTML = '<p class="note">Belum ada menu.</p>'; return; }
+  const sold = new Map();
+  // ponytail: count from orders already loaded (status 'selesai'); ceiling: all-time, ignores refunds — upgrade to filter by date if needed
+  (orders || []).forEach(o => { if (o.status === 'selesai') (o.items || []).forEach(it => sold.set(it.id, (sold.get(it.id) || 0) + (Number(it.qty) || 0))); });
+  try { localStorage.setItem('batak:sales', JSON.stringify(Object.fromEntries(sold))); } catch(e){}
   $('menu-list').innerHTML = menuItems.map(it => `<article class="card"><div class="card-body">
     <div class="card-foot"><strong>${esc(it.name)}</strong><small>${esc(it.category)}</small></div>
     <p>${esc(it.description || '')}</p>
-    <p>${rupiah(it.price)} / ${esc(it.unit)}${it.available ? '' : ' · <b>Habis</b>'}${it.bestSeller ? ' · Terlaris' : ''}${(it.images || []).length ? ` · ${it.images.length} foto` : ''}</p>
+    <p>${rupiah(it.price)} / ${esc(it.unit)}${it.available ? '' : ' • <b>Habis</b>'}${it.bestSeller ? ' • Terlaris' : ''}${(it.images || []).length ? ` • ${it.images.length} foto` : ''}${sold.has(it.id) ? ` • Terjual: ${sold.get(it.id)}` : ''}</p>
     <div class="chips">
       <button class="chip" type="button" data-edit="${esc(it.id)}">Ubah</button>
       <button class="chip" type="button" data-del="${esc(it.id)}">Hapus</button>
@@ -570,6 +684,57 @@ $('menu-cancel').addEventListener('click', resetMenuForm);
 
 /* --- tabs --- */
 const TABS = [...document.querySelectorAll('#tabs [role="tab"]')];
+/* --- staff & roles (owner only) --- */
+let staffRows = [];
+
+function initStaff() {
+  $('staff-save').addEventListener('click', saveStaff);
+  loadStaff();
+}
+
+async function loadStaff() {
+  try { staffRows = await listStaff(); }
+  catch (e) { $('staff-err').textContent = e.message; return; }
+  renderStaff();
+}
+
+function renderStaff() {
+  $('staff-list').innerHTML = staffRows.length
+    ? staffRows.map(s => `<div class="order-row">
+        <div class="info"><strong>${esc(s.email)}</strong><small>${ROLE_LABEL[s.role] || esc(s.role)}</small></div>
+        <div class="row">
+          <select class="staff-role" data-email="${esc(s.email)}" aria-label="Peran ${esc(s.email)}">
+            ${['kasir', 'admin', 'owner'].map(r => `<option value="${r}"${r === s.role ? ' selected' : ''}>${ROLE_LABEL[r]}</option>`).join('')}
+          </select>
+          <button class="btn ghost small" type="button" data-del="${esc(s.email)}" aria-label="Hapus ${esc(s.email)}">Hapus</button>
+        </div>
+      </div>`).join('')
+    : '<p class="note">Belum ada staf.</p>';
+  $('staff-list').querySelectorAll('select.staff-role').forEach(sel =>
+    sel.addEventListener('change', async () => {
+      try { await upsertStaff(sel.dataset.email, sel.value); }
+      catch (e) { $('staff-err').textContent = e.message; }
+      await loadStaff();
+    }));
+  $('staff-list').querySelectorAll('button[data-del]').forEach(b =>
+    b.addEventListener('click', async () => {
+      if (!confirm(`Hapus ${b.dataset.del} dari staf?`)) return;
+      try { await deleteStaff(b.dataset.del); }
+      catch (e) { $('staff-err').textContent = e.message; }
+      await loadStaff();
+    }));
+}
+
+async function saveStaff() {
+  $('staff-err').textContent = '';
+  const email = $('staff-email').value.trim().toLowerCase();
+  if (!email) { $('staff-err').textContent = 'Isi email.'; return; }
+  try { await upsertStaff(email, $('staff-role-new').value); }
+  catch (e) { $('staff-err').textContent = e.message; return; }
+  $('staff-email').value = '';
+  await loadStaff();
+}
+
 function showTab(name) {
   TABS.forEach(t => {
     const on = t.dataset.tab === name;
@@ -605,13 +770,13 @@ showTab('ringkasan');
 
 /* --- walk-in order builder + receipt (kasir / owner) --- */
 async function loadPicker() {
+  try { siteCfg = await (await fetch('data/site.json')).json(); biz = siteCfg.business || {}; } catch (e) {}
   try {
     pickerMenu = await listMenu();
   } catch (e) {
     $('kasir-menu').innerHTML = '<p class="note">Gagal memuat menu.</p>';
     return;
   }
-  try { biz = (await (await fetch('data/site.json')).json()).business || {}; } catch (e) {}
   renderPicker();
 }
 
@@ -704,19 +869,25 @@ $('send-go').addEventListener('click', async () => {
   const { o, step } = sendCtx;
   $('send-err').textContent = '';
   // window.open must run inside the click gesture, before the await, or the popup is blocked.
+  // window.open must run inside the click gesture, before the await, or the popup is blocked.
   openWhatsApp(o.phone, $('send-text').value);
+  // ponytail: 2nd popup for the driver is best-effort; if the browser blocks it, the owner
+  // can tap again or forward the address manually. Move to a server-side sender if it matters.
+  if (step === 'dikirim') notifyDriver(o);
   const ctx = sendCtx;
   $('send-dialog').close();
   await advance(ctx.o, ctx.step);
 });
 
+// ponytail: boot initializes state but only reveals login when signed in or on #login hash;
+// ceiling: homepage header (with Login link -> index.html#login) stays visible; hashchange re-runs bootStaff
 const bootStaff = () => {
-  if (isSignedIn()) { applyRole(); show('app'); load(); } else { show('login'); }
+  if (isSignedIn()) { applyRole(); show('app'); load(); }
+  else if (location.hash === '#login') show('login');
 };
-
 if (embedded) $('close-staff').hidden = false;
-if (!embedded || location.hash === '#login') bootStaff();
 if (embedded) {
   addEventListener('hashchange', () => { if (location.hash === '#login') bootStaff(); });
   $('close-staff').addEventListener('click', closeStaff);
+  bootStaff();
 }

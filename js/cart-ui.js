@@ -3,6 +3,7 @@ import { fillDateSelect } from './dates.js';
 import { buildMessage, openWhatsApp } from './whatsapp.js';
 import { syncAddress, validate, readOrder } from './checkout.js';
 import { insertOrder } from './db.js';
+import { coordsOf, deliveryFee } from './geo.js';
 
 const FIELDS = ['name', 'phone', 'address', 'date'];
 const errsFor = (errs, field) => errs.filter(e => e.field === field);
@@ -14,6 +15,9 @@ export function initCartUI(cart, items, site) {
   const panel = drawer.querySelector('.panel');
   const linesEl = document.getElementById('cart-lines');
   const total = document.getElementById('cart-total');
+  const grandEl = document.getElementById('cart-grand');
+  const ongkirLine = document.getElementById('ongkir-line');
+  const ongkirEl = document.getElementById('cart-ongkir');
   const barCount = document.getElementById('bar-count');
   const barTotal = document.getElementById('bar-total');
   const form = document.getElementById('order-form');
@@ -23,8 +27,20 @@ export function initCartUI(cart, items, site) {
 
   const subtotal = list => list.reduce((sum, { id, qty }) => sum + (byId.get(id)?.price || 0) * qty, 0);
 
+  const addr = form.elements.address;
+  const method = () => (form.querySelector('input[name="method"]:checked') || {}).value || 'antar';
+  const refreshTotals = () => {
+    const sub = subtotal(cart.lines());
+    const fee = method() === 'antar' ? deliveryFee(coordsOf(addr.value), site) : null;
+    total.textContent = rupiah(sub);
+    ongkirLine.hidden = !fee;
+    if (fee) ongkirEl.textContent = `${rupiah(fee.fee)} (${fee.km.toFixed(1)} km)`;
+    grandEl.textContent = rupiah(sub + (fee ? fee.fee : 0));
+  };
+
   const open = () => {
     drawer.hidden = false;
+    refreshTotals();
     document.body.classList.add('no-scroll');
     document.getElementById('close-cart').focus();
   };
@@ -52,7 +68,8 @@ export function initCartUI(cart, items, site) {
   });
 
   form.querySelectorAll('input[name="method"]').forEach(r =>
-    r.addEventListener('change', () => { syncAddress(form); clearFieldErrors(); }));
+    r.addEventListener('change', () => { syncAddress(form); refreshTotals(); }));
+  addr.addEventListener('input', refreshTotals);
   syncAddress(form);
 
   if (!fillDateSelect(form.elements.date, site.preorder)) {
@@ -106,7 +123,7 @@ export function initCartUI(cart, items, site) {
     barCount.textContent = n;
     barTotal.textContent = rupiah(subtotal(list));
     bar.hidden = n === 0;
-    total.textContent = rupiah(subtotal(list));
+    refreshTotals();
     linesEl.replaceChildren(...list.map(line));
     if (!drawer.hidden && n === 0) close();
   });
@@ -165,7 +182,8 @@ export function initCartUI(cart, items, site) {
       return;
     }
     const order = readOrder(form);
-    const bill = subtotal(list);
+    const fee = method() === 'antar' ? deliveryFee(coordsOf(addr.value), site) : null;
+    const bill = subtotal(list) + (fee ? fee.fee : 0);
 
     // Save to the admin database in the background; WhatsApp stays the reliable
     // confirm path, so a Supabase outage never blocks a customer's order.
@@ -187,7 +205,8 @@ export function initCartUI(cart, items, site) {
       name: site.business.name,
       items: list.map(({ id, qty }) => ({ ...(byId.get(id) || {}), qty })),
       order,
-      total: bill
+      total: subtotal(list),
+      fee
     }));
   });
 }

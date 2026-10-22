@@ -1,8 +1,13 @@
 {
-  "sampleData": true,
-  "business": { "name": "Batakness Foodie", "tagline": "Rasa Batak yang asli, dibuat dengan andaliman sungguhan di Jayapura.", "whatsapp": "628000000000", "city": "Entrop, Jayapura Selatan, Papua" },
+  "sampleData": false,
+  "business": { "name": "Batakness Foodie", "tagline": "Rasa Batak yang asli, dibuat dengan andaliman sungguhan di Jayapura.", "whatsapp": "628000000000", "city": "Entrop, Jayapura Selatan, Papua", "lat": "-2.5784014442943226", "lng": "140.69213274238396" },
   "halal": "[ISI] Status halal: tulis sesuai kenyataan (halal / non-halal / keduanya terpisah).",
   "preorder": { "open": true, "deliveryWeekday": 6, "cutoffDaysBefore": 2, "cutoffHour": 20, "weeks": 3 },
+  "ongkir": { "perKm": "5000", "roadFactor": 1.3 },
+  "drivers": [
+    { "name": "Budi", "whatsapp": "628123456789" },
+    { "name": "Ani", "whatsapp": "628987654321" }
+  ],
   "delivery": ["Pengiriman di Jayapura dan sekitarnya.", "[ISI] Ongkir dan minimal order", "Pembayaran: [ISI] transfer bank / QRIS"],
   "story": [
     "Andaliman adalah merica khas Batak: segar seperti jeruk, dan membuat lidah bergetar. Inilah rasa yang membedakan masakan Batak asli.",

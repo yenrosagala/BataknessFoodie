@@ -42,6 +42,8 @@ export function renderLayout(site) {
   <ul id="cart-lines"></ul>
   <div class="drawer-foot">
     <p><b>Subtotal: <span id="cart-total"></span></b></p>
+    <p id="ongkir-line" hidden><b>Ongkir: <span id="cart-ongkir"></span></b></p>
+    <p><b>Total: <span id="cart-grand"></span></b></p>
     <p class="note" id="closed-note" hidden>Pre-order sedang ditutup.</p>
     <form id="order-form" novalidate>
       <label>Nama<input name="name" required></label>

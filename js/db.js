@@ -22,14 +22,28 @@ const roleOf = user => {
   return ROLES.includes(r) ? r : 'owner';
 };
 
-function saveSession(d) {
+// Authoritative role: public.staff_roles via the my_role() RPC (sql/staff.sql).
+// Returns null when the table/RPC isn't set up yet so sign-in still works.
+async function fetchMyRole(accessToken) {
+  try {
+    const r = await fetch(`${url}/rest/v1/rpc/my_role`, {
+      method: 'POST', headers: headers(accessToken), body: '{}'
+    });
+    if (!r.ok) return null;
+    const t = (await r.text()).replace(/"/g, '').trim();
+    return ROLES.includes(t) ? t : null;
+  } catch (e) { return null; }
+}
+
+async function saveSession(d) {
   const prev = loadSession();
   const s = {
     access_token: d.access_token,
     refresh_token: d.refresh_token,
     expires_at: Date.now() + (d.expires_in || 3600) * 1000,
     email: (d.user && d.user.email) || (prev && prev.email) || '',
-    role: d.user ? roleOf(d.user) : ((prev && prev.role) || 'owner')
+    role: (d.access_token && await fetchMyRole(d.access_token))
+      || (d.user ? roleOf(d.user) : ((prev && prev.role) || 'owner'))
   };
   try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) {}
   return s;
@@ -85,7 +99,7 @@ async function token() {
       body: JSON.stringify({ refresh_token: s.refresh_token })
     });
     if (!r.ok) { clearSession(); return null; }
-    s = saveSession(await r.json());
+    s = await saveSession(await r.json());
   }
   return s.access_token;
 }
@@ -184,4 +198,36 @@ export async function deleteMenuItem(id) {
   });
   if (r.status === 401) { clearSession(); throw new Error('unauth'); }
   if (!r.ok) throw new Error('Gagal menghapus menu.');
+}
+
+/* --- staff & roles (owner only, enforced by RLS) --- */
+export async function listStaff() {
+  const t = await token();
+  if (!t) throw new Error('unauth');
+  const r = await fetch(`${url}/rest/v1/staff_roles?select=email,role&order=email.asc`, { headers: headers(t) });
+  if (r.status === 401) { clearSession(); throw new Error('unauth'); }
+  if (!r.ok) throw new Error('Gagal memuat staf. Sudah jalankan sql/staff.sql?');
+  return r.json();
+}
+
+export async function upsertStaff(email, role) {
+  const t = await token();
+  if (!t) throw new Error('unauth');
+  const r = await fetch(`${url}/rest/v1/staff_roles?on_conflict=email`, {
+    method: 'POST',
+    headers: { ...headers(t), Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify([{ email: email.trim().toLowerCase(), role }])
+  });
+  if (r.status === 401) { clearSession(); throw new Error('unauth'); }
+  if (!r.ok) throw new Error('Gagal menyimpan staf.');
+}
+
+export async function deleteStaff(email) {
+  const t = await token();
+  if (!t) throw new Error('unauth');
+  const r = await fetch(`${url}/rest/v1/staff_roles?email=eq.${encodeURIComponent(email)}`, {
+    method: 'DELETE', headers: { ...headers(t), Prefer: 'return=minimal' }
+  });
+  if (r.status === 401) { clearSession(); throw new Error('unauth'); }
+  if (!r.ok) throw new Error('Gagal menghapus staf.');
 }

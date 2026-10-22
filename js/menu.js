@@ -7,6 +7,12 @@ export function renderMenu(menu, onAdd, remaining = new Map()) {
   const fav = document.getElementById('fav-grid');
   const grid = document.getElementById('menu-grid');
   const chips = document.getElementById('chips');
+  // ponytail: read sold counts written by admin from localStorage; ceiling: local-only, not live cross-device — upgrade to server count if needed
+  let sales = new Map();
+  try {
+    const raw = localStorage.getItem('batak:sales');
+    if (raw) Object.entries(JSON.parse(raw) || {}).forEach(([k,v]) => { const n = +v||0; if (n>0) sales.set(k,n); });
+  } catch(e){}
 
   const stateOf = item => {
     const left = remaining.get(item.id);
@@ -23,8 +29,17 @@ export function renderMenu(menu, onAdd, remaining = new Map()) {
     const thumb = document.createElement('button');
     thumb.type = 'button';
     thumb.className = 'ph';
-    thumb.textContent = item.name.charAt(0).toUpperCase();
     thumb.setAttribute('aria-label', `Lihat detail ${item.name}`);
+    const imgs = Array.isArray(item.images) ? item.images.filter(Boolean) : [];
+    if (imgs[0]) {
+      thumb.style.backgroundImage = `url("${imgs[0]}")`;
+      thumb.style.backgroundSize = 'cover';
+      thumb.style.backgroundPosition = 'center';
+      thumb.style.color = 'transparent';
+      // ponytail: card shows first menu image as background; ceiling: no srcset/aspect-ratio/blur-up, upgrade to <img> with sizes/srcset if images are slow/large
+    } else {
+      thumb.textContent = item.name.charAt(0).toUpperCase();
+    }
     thumb.addEventListener('click', () => openDish(item, state, onAdd));
 
     const body = document.createElement('div');
@@ -39,6 +54,13 @@ export function renderMenu(menu, onAdd, remaining = new Map()) {
       sisa.className = 'badge';
       sisa.textContent = state.left > 0 ? `Sisa hari ini: ${state.left}` : 'Habis hari ini';
       body.append(sisa);
+    }
+    const sold = sales.get(item.id);
+    if (sold) {
+      const b = document.createElement('b');
+      b.className = 'badge alt';
+      b.textContent = `Terjual ${sold}x`;
+      body.append(b);
     }
 
     const foot = document.createElement('div');
@@ -71,6 +93,10 @@ export function renderMenu(menu, onAdd, remaining = new Map()) {
 
   const show = cat => {
     const list = cat === 'Semua' ? items : items.filter(i => i.category === cat);
+    if (!list.length) {
+      grid.replaceChildren(Object.assign(document.createElement('p'), { className: 'note', textContent: 'Belum ada menu tersedia.' }));
+      return;
+    }
     grid.replaceChildren(...list.map(card));
   };
 

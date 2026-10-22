@@ -59,6 +59,8 @@ function renderStage() {
     img.src = imgs[idx];
     img.alt = `${item.name} foto ${idx + 1}`;
     img.loading = 'lazy';
+    img.width = 560;
+    img.height = 260;
     stage.append(img);
   } else {
     const ph = document.createElement('div');
@@ -116,6 +118,19 @@ export function openDish(nextItem, state, onAdd) {
   panel.setAttribute('aria-label', nextItem.name);
   titleEl.textContent = nextItem.name;
   descEl.textContent = nextItem.description || '';
+  // ponytail: show sold count from admin-written localStorage; ceiling: local-only, not live cross-device — upgrade to server count if needed
+  root.querySelectorAll('.sold-badge').forEach(x => x.remove());
+  let sold = 0;
+  try {
+    const raw = localStorage.getItem('batak:sales');
+    if (raw) sold = +(JSON.parse(raw) || {})[nextItem.id] || 0;
+  } catch(e){}
+  if (sold) {
+    const b = document.createElement('b');
+    b.className = 'badge alt sold-badge';
+    b.textContent = `Terjual ${sold}x`;
+    descEl.after(b);
+  }
   priceEl.textContent = `${rupiah(nextItem.price)} / ${nextItem.unit}`;
 
   const btn = document.createElement('button');
